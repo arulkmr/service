@@ -13,10 +13,11 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf"
-	"github.com/arulkmr/service/app/sales-api/handlers"
 	"github.com/pkg/errors"
+	"github.com/rahulgopher/service/app/handlers"
 )
 
+// build is the git version of this program. It is set using build flags in the makefile.
 var build = "develop"
 
 func main() {
@@ -27,8 +28,10 @@ func main() {
 		os.Exit(1)
 	}
 }
-
 func run(log *log.Logger) error {
+
+	// =========================================================================
+	// Configuration
 
 	var cfg struct {
 		conf.Version
@@ -40,8 +43,7 @@ func run(log *log.Logger) error {
 			ShutdownTimeout time.Duration `conf:"default:5s"`
 		}
 	}
-
-   // cfg.Version.SVN = build
+	cfg.Version.SVN = build
 	cfg.Version.Desc = "copyright information here"
 
 	if err := conf.Parse(os.Args[1:], "SALES", &cfg); err != nil {
@@ -64,7 +66,10 @@ func run(log *log.Logger) error {
 		return errors.Wrap(err, "parsing config")
 	}
 
+	// =========================================================================
+	// App Starting
 
+	// Print the build version for our logs. Also expose it under /debug/vars.
 	expvar.NewString("build").Set(build)
 	log.Printf("main : Started : Application initializing : version %q", build)
 	defer log.Println("main: Completed")
@@ -74,34 +79,6 @@ func run(log *log.Logger) error {
 		return errors.Wrap(err, "generating config for output")
 	}
 	log.Printf("main: Config :\n%v\n", out)
-	
-	// =========================================================================
-	// Start API Service
-
-	log.Println("main: Initializing API support")
-
-	// Make a channel to listen for an interrupt or terminate signal from the OS.
-	// Use a buffered channel because the signal package requires it.
-	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
-
-	api := http.Server{
-		Addr:         cfg.Web.APIHost,
-		//Handler:      handlers.API(build, shutdown, log, db, a),
-	    Handler:      handlers.API(build, shutdown, log),
-		ReadTimeout:  cfg.Web.ReadTimeout,
-		WriteTimeout: cfg.Web.WriteTimeout,
-	}
-
-	// Make a channel to listen for errors coming from the listener. Use a
-	// buffered channel so the goroutine can exit if we don't collect this error.
-	serverErrors := make(chan error, 1)
-
-	// Start the service listening for requests.
-	go func() {
-		log.Printf("main: API listening on %s", api.Addr)
-		serverErrors <- api.ListenAndServe()
-	}()
 
 	// =========================================================================
 	// Start Debug Service
@@ -120,8 +97,34 @@ func run(log *log.Logger) error {
 		}
 	}()
 
+	//select {} // blocking statement [ similar as switch, block until one of case is matched]
+	// =========================================================================
+	// Start API Service
 
-	// select {}
+	log.Println("main: Initializing API support")
+
+	// Make a channel to listen for an interrupt or terminate signal from the OS.
+	// Use a buffered channel because the signal package requires it.
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+
+	api := http.Server{
+		Addr: cfg.Web.APIHost,
+		//Handler:      handlers.API(build, shutdown, log, db, a),
+		Handler:      handlers.API(build, shutdown, log),
+		ReadTimeout:  cfg.Web.ReadTimeout,
+		WriteTimeout: cfg.Web.WriteTimeout,
+	}
+
+	// Make a channel to listen for errors coming from the listener. Use a
+	// buffered channel so the goroutine can exit if we don't collect this error.
+	serverErrors := make(chan error, 1)
+
+	// Start the service listening for requests.
+	go func() {
+		log.Printf("main: API listening on %s", api.Addr)
+		serverErrors <- api.ListenAndServe()
+	}()
 
 	// =========================================================================
 	// Shutdown
@@ -144,9 +147,5 @@ func run(log *log.Logger) error {
 			return errors.Wrap(err, "could not stop server gracefully")
 		}
 	}
-
-	
-	log.Println("Service Started")
 	return nil
-
 }
